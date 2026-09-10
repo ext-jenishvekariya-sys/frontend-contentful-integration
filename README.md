@@ -1,36 +1,104 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Contentful + Next.js Demo (GraphQL, with Preview API)
 
-## Getting Started
+A minimal Next.js (App Router) app showing the Next.js team a working
+integration with Contentful:
 
-First, run the development server:
+- Content fetched with the **GraphQL Content API** (no SDK, plain `fetch`)
+- **Content Delivery API** (published content) by default
+- **Content Preview API** (draft content) via Next.js **Draft Mode**
+- A single content type, `carProduct`, with fields `modelName`, `carPrice`,
+  `carImage`
+
+## How it fits together
+
+| File | Purpose |
+| --- | --- |
+| [`src/lib/contentful.ts`](src/lib/contentful.ts) | Thin GraphQL client. Picks the CDA or CPA token and endpoint based on a `preview` flag. |
+| [`src/lib/queries.ts`](src/lib/queries.ts) | GraphQL queries for the `carProduct` content type. |
+| [`src/lib/types.ts`](src/lib/types.ts) | TypeScript types matching the GraphQL response shape. |
+| [`src/app/page.tsx`](src/app/page.tsx) | Lists `carProduct` entries. |
+| [`src/app/cars/[id]/page.tsx`](src/app/cars/[id]/page.tsx) | Single `carProduct` entry, looked up by `sys.id`. |
+| [`src/app/api/preview/route.ts`](src/app/api/preview/route.ts) | Enables Next.js Draft Mode (switches reads to the Preview API). |
+| [`src/app/api/exit-preview/route.ts`](src/app/api/exit-preview/route.ts) | Disables Draft Mode. |
+| [`src/components/PreviewBanner.tsx`](src/components/PreviewBanner.tsx) | Banner shown on every page while Draft Mode is on. |
+
+Every page reads `draftMode()` from `next/headers` and passes `isEnabled` as
+the `preview` flag into `fetchGraphQL`. That's the entire mechanism: one flag
+decides the token and the endpoint used for that request. No separate
+"preview build" is needed.
+
+## Setup
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.local.example` to `.env.local` and fill in your space's values
+(a working `.env.local` is already included in this demo for convenience —
+treat it as a secret file, it is git-ignored):
 
-## Learn More
+```
+CONTENTFUL_SPACE_ID=
+CONTENTFUL_ENVIRONMENT=master
+CONTENTFUL_CDA_TOKEN=
+CONTENTFUL_CPA_TOKEN=
+CONTENTFUL_PREVIEW_SECRET=
+```
 
-To learn more about Next.js, take a look at the following resources:
+`CONTENTFUL_CMA_TOKEN` (Content Management API) is not used by this app —
+it's a read-only demo. Never expose the CMA token to the client; if you add a
+use for it, only call it from server-side code (API routes / Server
+Components), same as the CDA/CPA tokens here.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Adding content
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The `carProduct` content type currently has no entries. In Contentful, add
+an entry with:
 
-## Deploy on Vercel
+- `modelName` (Short text)
+- `carPrice` (Integer)
+- `carImage` (Media, one image)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Publish it and it will show up on `/` using the Content Delivery API.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Trying the Preview API
+
+1. Leave a `carProduct` entry **unpublished** (or publish it, then edit a
+   field without publishing the change) so the draft differs from what's
+   published.
+2. Visit:
+   ```
+   http://localhost:3000/api/preview?secret=YOUR_CONTENTFUL_PREVIEW_SECRET&path=/
+   ```
+   using the value of `CONTENTFUL_PREVIEW_SECRET` from `.env.local`.
+3. You'll be redirected to `/` with a "Preview mode enabled" banner, now
+   showing the draft data via the Content Preview API.
+4. Click "Exit preview" (or visit `/api/exit-preview`) to go back to
+   published-only content.
+
+In a real project, configure this same URL as the **Preview URL** on the
+`carProduct` content type in Contentful's web app (Settings → Content model
+→ carProduct → Preview panel), typically:
+
+```
+https://your-domain/api/preview?secret=YOUR_SECRET&path=/cars/{entry_id}
+```
+
+so editors can click "Preview" directly from the entry editor.
+
+## Notes for the Next.js team
+
+- Published reads use `cache: "force-cache"`; preview reads use
+  `cache: "no-store"` so drafts are never cached. See `fetchGraphQL` in
+  `src/lib/contentful.ts`.
+- Calling `draftMode()` in a page automatically opts that route into dynamic
+  rendering — no extra config needed for preview to work correctly.
+- Images are served through `next/image`, pointed at Contentful's asset CDN
+  (`images.ctfassets.net`, allow-listed in `next.config.ts`), with
+  Contentful's own image API params (`?w=...&h=...&fit=fill`) applied at the
+  URL level.
